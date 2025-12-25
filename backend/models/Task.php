@@ -1,0 +1,449 @@
+<?php
+class Task
+{
+    private $conn;
+    private $table_name = "tasks";
+
+    public $id;
+    public $title;
+    public $description;
+    public $priority;
+    public $status;
+    public $due_date;
+    public $created_by;
+    public $assigned_to;
+    public $created_at;
+    public $updated_at;
+    public $is_extended; // New property
+    public $project_id;
+    public $parent_id;
+    public $recurring_task_id;
+    public $questions;
+    public $assigned_user_name;
+    public $creator_name;
+
+    public function __construct($db)
+    {
+        $this->conn = $db;
+    }
+
+    public function create()
+    {
+        $query = "INSERT INTO " . $this->table_name . " SET title=:title, description=:description, priority=:priority, status=:status, due_date=:due_date, created_by=:created_by, assigned_to=:assigned_to, project_id=:project_id, parent_id=:parent_id, recurring_task_id=:recurring_task_id, questions=:questions, is_extended=0";
+        $stmt = $this->conn->prepare($query);
+
+        $this->title = htmlspecialchars(strip_tags($this->title));
+        $this->description = htmlspecialchars(strip_tags($this->description));
+        $this->priority = htmlspecialchars(strip_tags($this->priority));
+        $this->status = htmlspecialchars(strip_tags($this->status));
+        $this->due_date = !empty($this->due_date) ? htmlspecialchars(strip_tags($this->due_date)) : null;
+        $this->created_by = htmlspecialchars(strip_tags($this->created_by));
+        $this->assigned_to = htmlspecialchars(strip_tags($this->assigned_to));
+        $this->project_id = !empty($this->project_id) ? htmlspecialchars(strip_tags($this->project_id)) : null;
+        $this->parent_id = !empty($this->parent_id) ? htmlspecialchars(strip_tags($this->parent_id)) : null;
+        $this->recurring_task_id = !empty($this->recurring_task_id) ? htmlspecialchars(strip_tags($this->recurring_task_id)) : null;
+
+        // questions is JSON
+        if (is_array($this->questions) || is_object($this->questions)) {
+            $this->questions = json_encode($this->questions);
+        }
+
+        $stmt->bindParam(":title", $this->title);
+        $stmt->bindParam(":description", $this->description);
+        $stmt->bindParam(":priority", $this->priority);
+        $stmt->bindParam(":status", $this->status);
+        if (empty($this->due_date)) {
+            $this->due_date = null;
+        }
+        $stmt->bindParam(":due_date", $this->due_date);
+        $stmt->bindParam(":created_by", $this->created_by);
+        $stmt->bindParam(":assigned_to", $this->assigned_to);
+        $stmt->bindParam(":project_id", $this->project_id);
+        $stmt->bindParam(":parent_id", $this->parent_id);
+        $stmt->bindParam(":recurring_task_id", $this->recurring_task_id);
+        $stmt->bindParam(":questions", $this->questions);
+
+        if ($stmt->execute()) {
+            // Capture new ID for downstream use (notifications, etc.)
+            $this->id = $this->conn->lastInsertId();
+            return true;
+        }
+        // Log the error for debugging
+        $error = $stmt->errorInfo();
+        error_log("Task Creation Error: " . print_r($error, true));
+        return false;
+    }
+
+    /**
+     * Fetch a single task by ID, populate model properties, and return the row.
+     */
+    public function getById()
+    {
+        $query = "SELECT t.*, u.username as assigned_user_name, c.username as creator_name
+                  FROM " . $this->table_name . " t
+                  LEFT JOIN users u ON t.assigned_to = u.id
+                  LEFT JOIN users c ON t.created_by = c.id
+                  WHERE t.id = :id
+                  LIMIT 1";
+
+        $stmt = $this->conn->prepare($query);
+        $this->id = htmlspecialchars(strip_tags($this->id));
+        $stmt->bindParam(":id", $this->id);
+        $stmt->execute();
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $this->title = $row['title'];
+            $this->description = $row['description'];
+            $this->priority = $row['priority'];
+            $this->status = $row['status'];
+            $this->due_date = $row['due_date'];
+            $this->created_by = $row['created_by'];
+            $this->assigned_to = $row['assigned_to'];
+            $this->created_at = $row['created_at'];
+            $this->updated_at = $row['updated_at'];
+            $this->is_extended = $row['is_extended']; // Populate is_extended
+            $this->project_id = $row['project_id'];
+            $this->parent_id = $row['parent_id'];
+            $this->recurring_task_id = $row['recurring_task_id'];
+            $this->questions = $row['questions'];
+            // keep extra joined fields available to controller if needed
+            $this->assigned_user_name = $row['assigned_user_name'];
+            $this->creator_name = $row['creator_name'];
+            return $row;
+        }
+        return false;
+    }
+
+    /**
+     * Update task fields.
+     */
+    public function update()
+    {
+        $query = "UPDATE " . $this->table_name . "
+                  SET title = :title,
+                      description = :description,
+                      priority = :priority,
+                      status = :status,
+                      due_date = :due_date,
+                      assigned_to = :assigned_to,
+                      is_extended = :is_extended,
+                      project_id = :project_id,
+                      parent_id = :parent_id,
+                      questions = :questions
+                  WHERE id = :id";
+
+        $stmt = $this->conn->prepare($query);
+
+        $this->id = htmlspecialchars(strip_tags($this->id));
+        $this->title = htmlspecialchars(strip_tags($this->title));
+        $this->description = htmlspecialchars(strip_tags($this->description));
+        $this->priority = htmlspecialchars(strip_tags($this->priority));
+        $this->status = htmlspecialchars(strip_tags($this->status));
+        $this->due_date = htmlspecialchars(strip_tags($this->due_date));
+        $this->assigned_to = htmlspecialchars(strip_tags($this->assigned_to));
+        $this->is_extended = isset($this->is_extended) ? (int) $this->is_extended : 0;
+        $this->project_id = !empty($this->project_id) ? htmlspecialchars(strip_tags($this->project_id)) : null;
+        $this->parent_id = !empty($this->parent_id) ? htmlspecialchars(strip_tags($this->parent_id)) : null;
+
+        // questions is JSON
+        if (is_array($this->questions) || is_object($this->questions)) {
+            $this->questions = json_encode($this->questions);
+        }
+
+        $stmt->bindParam(":id", $this->id);
+        $stmt->bindParam(":title", $this->title);
+        $stmt->bindParam(":description", $this->description);
+        $stmt->bindParam(":priority", $this->priority);
+        $stmt->bindParam(":status", $this->status);
+        if (empty($this->due_date)) {
+            $this->due_date = null;
+        }
+        $stmt->bindParam(":due_date", $this->due_date);
+        $stmt->bindParam(":assigned_to", $this->assigned_to);
+        $stmt->bindParam(":is_extended", $this->is_extended);
+        $stmt->bindParam(":project_id", $this->project_id);
+        $stmt->bindParam(":parent_id", $this->parent_id);
+        $stmt->bindParam(":questions", $this->questions);
+
+        if ($stmt->execute()) {
+            return true;
+        }
+        return false;
+    }
+
+    public function getAll($user_id, $role, $params = [], $company_id = null)
+    {
+        $page = isset($params['page']) ? (int) $params['page'] : 1;
+        $limit = isset($params['limit']) ? (int) $params['limit'] : 10;
+        $offset = ($page - 1) * $limit;
+
+        $sort_by = isset($params['sort_by']) ? $params['sort_by'] : 'created_at';
+        $sort_order = isset($params['sort_order']) && strtoupper($params['sort_order']) === 'ASC' ? 'ASC' : 'DESC';
+
+        $search = isset($params['search']) ? $params['search'] : '';
+        $priority = isset($params['priority']) ? $params['priority'] : '';
+        $status = isset($params['status']) ? $params['status'] : '';
+        $project_id = isset($params['project_id']) ? $params['project_id'] : '';
+        $parent_id = isset($params['parent_id']) ? $params['parent_id'] : '';
+
+        // Allowed sort columns
+        $allowed_sorts = ['title', 'due_date', 'priority', 'created_at', 'assigned_to'];
+        if (!in_array($sort_by, $allowed_sorts)) {
+            $sort_by = 'created_at';
+        }
+
+        // Base Query - Filter out deleted tasks
+        $query = "SELECT t.*, u.username as assigned_user_name, c.username as creator_name 
+                  FROM " . $this->table_name . " t 
+                  LEFT JOIN users u ON t.assigned_to = u.id 
+                  LEFT JOIN users c ON t.created_by = c.id
+                  WHERE t.deleted_at IS NULL";
+
+        // Role Restriction
+        if ($role === 'owner' && $company_id) {
+            // Owner sees tasks where creator belongs to their company
+            $query .= " AND c.company_id = :company_id";
+        } elseif ($role !== 'admin' && $role !== 'manager') {
+            $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
+        }
+
+        // Filters
+        if (!empty($search)) {
+            $query .= " AND (t.title LIKE :search OR t.description LIKE :search)";
+        }
+        if (!empty($priority)) {
+            $query .= " AND t.priority = :priority";
+        }
+        if (!empty($status) && $status !== 'all') {
+            $query .= " AND t.status = :status";
+        }
+        if (!empty($project_id)) {
+            $query .= " AND t.project_id = :project_id";
+        }
+        if (isset($params['parent_id']) && $params['parent_id'] !== '') {
+            if ($parent_id === 'null') {
+                $query .= " AND t.parent_id IS NULL";
+            } else {
+                $query .= " AND t.parent_id = :parent_id";
+            }
+        }
+
+        // Sorting
+        if ($sort_by === 'assigned_to') {
+            $query .= " ORDER BY u.username $sort_order";
+        } else {
+            $query .= " ORDER BY t.$sort_by $sort_order";
+        }
+
+        // Pagination
+        $query .= " LIMIT :limit OFFSET :offset";
+
+        $stmt = $this->conn->prepare($query);
+
+        // Bind Parameters
+        if ($role === 'owner' && $company_id) {
+            $stmt->bindParam(":company_id", $company_id);
+        } elseif ($role !== 'admin' && $role !== 'manager') {
+            $stmt->bindParam(":user_id", $user_id);
+        }
+
+        if (!empty($search)) {
+            $search_term = "%{$search}%";
+            $stmt->bindParam(":search", $search_term);
+        }
+        if (!empty($priority)) {
+            $stmt->bindParam(":priority", $priority);
+        }
+        if (!empty($status) && $status !== 'all') {
+            $stmt->bindParam(":status", $status);
+        }
+        if (!empty($project_id)) {
+            $stmt->bindParam(":project_id", $project_id);
+        }
+        if (isset($params['parent_id']) && $params['parent_id'] !== '' && $parent_id !== 'null') {
+            $stmt->bindParam(":parent_id", $parent_id);
+        }
+
+        $stmt->bindParam(":limit", $limit, PDO::PARAM_INT);
+        $stmt->bindParam(":offset", $offset, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        return $stmt;
+    }
+
+    public function countAll($user_id, $role, $params = [], $company_id = null)
+    {
+        $search = isset($params['search']) ? $params['search'] : '';
+        $priority = isset($params['priority']) ? $params['priority'] : '';
+        $status = isset($params['status']) ? $params['status'] : '';
+        $project_id = isset($params['project_id']) ? $params['project_id'] : '';
+        $parent_id = isset($params['parent_id']) ? $params['parent_id'] : '';
+
+        // Base query with joins for filtering
+        $query = "SELECT COUNT(*) as total FROM " . $this->table_name . " t 
+                  LEFT JOIN users c ON t.created_by = c.id
+                  WHERE t.deleted_at IS NULL";
+
+        if ($role === 'owner' && $company_id) {
+            $query .= " AND c.company_id = :company_id";
+        } elseif ($role !== 'admin' && $role !== 'manager') {
+            $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
+        }
+
+        if (!empty($search)) {
+            $query .= " AND (t.title LIKE :search OR t.description LIKE :search)";
+        }
+        if (!empty($priority)) {
+            $query .= " AND t.priority = :priority";
+        }
+        if (!empty($status) && $status !== 'all') {
+            $query .= " AND t.status = :status";
+        }
+        if (!empty($project_id)) {
+            $query .= " AND t.project_id = :project_id";
+        }
+        if (isset($params['parent_id']) && $params['parent_id'] !== '') {
+            if ($parent_id === 'null') {
+                $query .= " AND t.parent_id IS NULL";
+            } else {
+                $query .= " AND t.parent_id = :parent_id";
+            }
+        }
+
+        $stmt = $this->conn->prepare($query);
+
+        if ($role === 'owner' && $company_id) {
+            $stmt->bindParam(":company_id", $company_id);
+        } elseif ($role !== 'admin' && $role !== 'manager') {
+            $stmt->bindParam(":user_id", $user_id);
+        }
+
+        if (!empty($search)) {
+            $search_term = "%{$search}%";
+            $stmt->bindParam(":search", $search_term);
+        }
+        if (!empty($priority)) {
+            $stmt->bindParam(":priority", $priority);
+        }
+        if (!empty($status) && $status !== 'all') {
+            $stmt->bindParam(":status", $status);
+        }
+        if (!empty($project_id)) {
+            $stmt->bindParam(":project_id", $project_id);
+        }
+        if (isset($params['parent_id']) && $params['parent_id'] !== '' && $parent_id !== 'null') {
+            $stmt->bindParam(":parent_id", $parent_id);
+        }
+
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row['total'];
+    }
+
+    // Soft Delete
+    public function delete()
+    {
+        $query = "UPDATE " . $this->table_name . " SET deleted_at = NOW() WHERE id = ?";
+        $stmt = $this->conn->prepare($query);
+        $this->id = htmlspecialchars(strip_tags($this->id));
+        $stmt->bindParam(1, $this->id);
+
+        if ($stmt->execute()) {
+            return true;
+        }
+        return false;
+    }
+
+    // Get Trash
+    public function getTrash($user_id, $role)
+    {
+        $query = "SELECT t.*, u.username as assigned_user_name, c.username as creator_name 
+                  FROM " . $this->table_name . " t 
+                  LEFT JOIN users u ON t.assigned_to = u.id 
+                  LEFT JOIN users c ON t.created_by = c.id
+                  WHERE t.deleted_at IS NOT NULL";
+
+        if ($role !== 'admin' && $role !== 'manager') {
+            $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
+        }
+
+        $query .= " ORDER BY t.deleted_at DESC";
+
+        $stmt = $this->conn->prepare($query);
+
+        if ($role !== 'admin' && $role !== 'manager') {
+            $stmt->bindParam(":user_id", $user_id);
+        }
+
+        $stmt->execute();
+        return $stmt;
+    }
+
+    // Restore Task
+    public function restore()
+    {
+        $query = "UPDATE " . $this->table_name . " SET deleted_at = NULL WHERE id = ?";
+        $stmt = $this->conn->prepare($query);
+        $this->id = htmlspecialchars(strip_tags($this->id));
+        $stmt->bindParam(1, $this->id);
+
+        if ($stmt->execute()) {
+            return true;
+        }
+        return false;
+    }
+
+    // Force Delete
+    public function forceDelete()
+    {
+        $query = "DELETE FROM " . $this->table_name . " WHERE id = ?";
+        $stmt = $this->conn->prepare($query);
+        $this->id = htmlspecialchars(strip_tags($this->id));
+        $stmt->bindParam(1, $this->id);
+
+        if ($stmt->execute()) {
+            return true;
+        }
+        return false;
+    }
+    // Get Statistics (Total, Pending, In Progress, Completed)
+    public function getStatistics($user_id, $role, $company_id = null)
+    {
+        $query = "SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+                    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
+                  FROM " . $this->table_name . " t 
+                  LEFT JOIN users c ON t.created_by = c.id
+                  WHERE t.deleted_at IS NULL";
+
+        if ($role === 'owner' && $company_id) {
+            $query .= " AND c.company_id = :company_id";
+        } elseif ($role !== 'admin' && $role !== 'manager') {
+            $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
+        }
+
+        $stmt = $this->conn->prepare($query);
+
+        if ($role === 'owner' && $company_id) {
+            $stmt->bindParam(":company_id", $company_id);
+        } elseif ($role !== 'admin' && $role !== 'manager') {
+            $stmt->bindParam(":user_id", $user_id);
+        }
+
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // Ensure we return zeros instead of nulls if no tasks found
+        return [
+            'total' => (int) ($row['total'] ?? 0),
+            'pending' => (int) ($row['pending'] ?? 0),
+            'in_progress' => (int) ($row['in_progress'] ?? 0),
+            'completed' => (int) ($row['completed'] ?? 0)
+        ];
+    }
+}
+?>

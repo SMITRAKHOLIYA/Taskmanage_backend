@@ -1,0 +1,2 @@
+RewriteEngine On
+RewriteRule ^task_backend/backend/api.php/(.*)$ task_backend/backend/api.php [QSA,L]
