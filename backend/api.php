@@ -4,7 +4,17 @@
    CORS (PRODUCTION)
  ======================= */
 header("Content-Type: application/json");
-header("Access-Control-Allow-Origin: https://taskmanage.iceiy.com");
+$allowed_origins = [
+    "https://taskmanage.iceiy.com",
+    "http://localhost:5173",
+    "http://localhost:4173"
+];
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, $allowed_origins)) {
+    header("Access-Control-Allow-Origin: $origin");
+} else {
+    header("Access-Control-Allow-Origin: https://taskmanage.iceiy.com"); // Fallback
+}
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 
@@ -20,9 +30,10 @@ require_once __DIR__ . "/config/db.php";
 require_once __DIR__ . "/utils/JWTHandler.php";
 
 /* =======================
-   ROUTE NORMALIZATION
+   ROUTE NORMALIZATIONk
    FIX FOR AEONFREE
  ======================= */
+
 
 /*
 Valid URLs:
@@ -30,6 +41,7 @@ Valid URLs:
 - /task_backend/backend/api.php/auth/login
 - /task_backend/backend/api.php/tasks/1
 */
+
 
 // Enable error reporting for debugging
 ini_set('display_errors', 1);
@@ -286,6 +298,10 @@ try {
     }
 } catch (Throwable $e) {
     http_response_code(500);
+    // Log the error
+    error_log("API Error: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
+    error_log("Stack Trace: " . $e->getTraceAsString());
+
     echo json_encode([
         "success" => false,
         "message" => "Server Error: " . $e->getMessage(),
@@ -293,3 +309,16 @@ try {
         "line" => $e->getLine()
     ]);
 }
+// Handle fatal errors
+register_shutdown_function(function () {
+    $error = error_get_last();
+    if ($error !== NULL && $error['type'] === E_ERROR) {
+        http_response_code(500);
+        echo json_encode([
+            "success" => false,
+            "message" => "Fatal Error: " . $error['message'],
+            "file" => $error['file'],
+            "line" => $error['line']
+        ]);
+    }
+});

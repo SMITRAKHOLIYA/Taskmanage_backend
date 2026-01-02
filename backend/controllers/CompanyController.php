@@ -81,6 +81,15 @@ class CompanyController
 
             if ($stmt->execute()) {
                 $companyId = $this->db->lastInsertId();
+
+                // CRITICAL: Immediately assign this company to the Owner (creator)
+                $queryUpdateUser = "UPDATE users SET company_id = :company_id WHERE id = :user_id";
+                $stmtUpdate = $this->db->prepare($queryUpdateUser);
+                $stmtUpdate->bindParam(':company_id', $companyId);
+                $stmtUpdate->bindParam(':user_id', $this->user_id);
+                $stmtUpdate->execute();
+
+                // Update session/token context (Client needs to re-login or refresh token really, but we return ID)
                 http_response_code(201);
                 echo json_encode(array("message" => "Company created.", "id" => $companyId));
             } else {

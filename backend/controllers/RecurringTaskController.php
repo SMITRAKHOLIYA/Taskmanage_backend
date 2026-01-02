@@ -12,6 +12,7 @@ class RecurringTaskController
     private $jwt;
     private $user_id;
     private $user_role;
+    private $company_id; // Added property
 
     public function __construct()
     {
@@ -85,13 +86,18 @@ class RecurringTaskController
             $this->recurringTask->created_by = $this->user_id;
             $this->recurringTask->recurrence_trigger = $data->recurrence_trigger ?? 'schedule';
             $this->recurringTask->questions = isset($data->questions) ? json_encode($data->questions) : null;
+            $this->recurringTask->company_id = $this->company_id; // Assign company_id from session
 
             if ($this->recurringTask->create()) {
-                // If trigger is completion and start_date <= today, generate first task
-                if (
-                    $this->recurringTask->recurrence_trigger === 'completion' &&
-                    strtotime($this->recurringTask->start_date) <= time()
-                ) {
+                error_log("Recurring Task Created ID: " . $this->recurringTask->id);
+                error_log("Start Date: " . $this->recurringTask->start_date);
+                error_log("Server Time: " . time() . " (" . date('Y-m-d H:i:s') . ")");
+                error_log("Comparison: " . strtotime($this->recurringTask->start_date) . " <= " . time());
+
+                // Generate first task immediately if start_date <= today
+                // This applies to BOTH 'schedule' and 'completion' triggers for the first run
+                if (strtotime($this->recurringTask->start_date) <= time()) {
+                    error_log("Triggering immediate generation for Recurring Task ID: " . $this->recurringTask->id);
 
                     $this->task->title = $this->recurringTask->title;
                     $this->task->description = $this->recurringTask->description;
@@ -102,9 +108,28 @@ class RecurringTaskController
                     $this->task->project_id = $this->recurringTask->project_id;
                     $this->task->recurring_task_id = $this->recurringTask->id;
                     $this->task->questions = $this->recurringTask->questions;
-                    $this->task->due_date = date('Y-m-d 23:59:59');
+                    $this->task->company_id = $this->company_id; // Inherit company_id
 
-                    $this->task->create();
+                    // For 'schedule', due date is start_date (or today) + frequency? 
+                    // Usually first task due date = start date.
+                    // For 'completion', it's usually immediate.
+                    $this->task->due_date = $this->recurringTask->start_date . ' 23:59:59';
+
+                    if ($this->task->create()) {
+                        error_log("Immediate task generated successfully. Task ID: " . $this->task->id);
+                        // For 'schedule', we must also update the next_run_date
+                        if ($this->recurringTask->recurrence_trigger === 'schedule') {
+                            $this->recurringTask->updateNextRunDate(
+                                $this->recurringTask->id,
+                                $this->recurringTask->frequency,
+                                $this->recurringTask->start_date
+                            );
+                        }
+                    } else {
+                        error_log("Failed to generate immediate task.");
+                    }
+                } else {
+                    error_log("Immediate generation skipped. Start date is in future.");
                 }
 
                 http_response_code(201);
@@ -145,8 +170,8 @@ class RecurringTaskController
             return;
         }
 
-        // Filter by company_id if needed, but for now we'll use user_id or all
-        $stmt = $this->recurringTask->getAll();
+        // Filter by company_id and role
+        $stmt = $this->recurringTask->getAll($this->user_id, $this->user_role, $this->company_id);
         $tasks_arr = array();
 
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {

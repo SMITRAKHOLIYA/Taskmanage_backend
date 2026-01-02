@@ -202,6 +202,7 @@ class TaskController
             $this->task->project_id = !empty($data->project_id) ? $data->project_id : null;
             $this->task->parent_id = !empty($data->parent_id) ? $data->parent_id : null;
             $this->task->questions = isset($data->questions) ? $data->questions : null;
+            $this->task->company_id = $this->company_id; // Assign company_id from session
 
             error_log("Creating task: " . json_encode($data));
             error_log("Task Object: " . json_encode($this->task));
@@ -373,7 +374,7 @@ class TaskController
     {
         $this->authenticate();
 
-        $stmt = $this->task->getTrash($this->user_id, $this->user_role);
+        $stmt = $this->task->getTrash($this->user_id, $this->user_role, $this->company_id);
         $tasks_arr = array();
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
             extract($row);

@@ -19,6 +19,8 @@ class RecurringTask
     public $recurrence_trigger;
     public $questions;
 
+    public $company_id; // Added for strict isolation
+
     public function __construct($db)
     {
         $this->conn = $db;
@@ -30,8 +32,7 @@ class RecurringTask
                   SET title=:title, description=:description, priority=:priority, 
                       assigned_to=:assigned_to, project_id=:project_id, 
                       frequency=:frequency, start_date=:start_date, next_run_date=:next_run_date, 
- 
-                      created_by=:created_by, recurrence_trigger=:recurrence_trigger, questions=:questions";
+                      created_by=:created_by, recurrence_trigger=:recurrence_trigger, questions=:questions, company_id=:company_id";
 
         $stmt = $this->conn->prepare($query);
 
@@ -45,6 +46,8 @@ class RecurringTask
         $this->next_run_date = htmlspecialchars(strip_tags($this->next_run_date));
         $this->created_by = htmlspecialchars(strip_tags($this->created_by));
         $this->recurrence_trigger = htmlspecialchars(strip_tags($this->recurrence_trigger));
+        $this->company_id = !empty($this->company_id) ? htmlspecialchars(strip_tags($this->company_id)) : null;
+
         // questions is JSON, so we don't strip tags, but maybe validate it's valid JSON?
         // For now, assume it's passed as a JSON string or array
         if (is_array($this->questions) || is_object($this->questions)) {
@@ -61,6 +64,15 @@ class RecurringTask
         $stmt->bindParam(":next_run_date", $this->next_run_date);
         $stmt->bindParam(":created_by", $this->created_by);
         $stmt->bindParam(":recurrence_trigger", $this->recurrence_trigger);
+        $stmt->bindParam(":recurrence_trigger", $this->recurrence_trigger);
+
+        if ($this->company_id === null) {
+            $stmt->bindValue(":company_id", null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(":company_id", $this->company_id, PDO::PARAM_INT);
+        }
+
+        $stmt->bindParam(":questions", $this->questions);
         $stmt->bindParam(":questions", $this->questions);
 
         if ($stmt->execute()) {
@@ -98,10 +110,36 @@ class RecurringTask
         return false;
     }
 
-    public function getAll()
+    public function getAll($user_id, $role, $company_id = null)
     {
-        $query = "SELECT * FROM " . $this->table_name . " ORDER BY created_at DESC";
+        $query = "SELECT t.*, u.username as assigned_user_name, c.username as creator_name 
+                  FROM " . $this->table_name . " t 
+                  LEFT JOIN users u ON t.assigned_to = u.id 
+                  LEFT JOIN users c ON t.created_by = c.id
+                  WHERE 1=1";
+
+        // Unified Company Isolation
+        if ($company_id) {
+            $query .= " AND t.company_id = :company_id";
+        }
+
+        // Role Restrictions
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
+            $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
+        }
+
+        $query .= " ORDER BY t.created_at DESC";
+
         $stmt = $this->conn->prepare($query);
+
+        if ($company_id) {
+            $stmt->bindParam(":company_id", $company_id);
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
+            $stmt->bindParam(":user_id", $user_id);
+        }
+
         $stmt->execute();
         return $stmt;
     }

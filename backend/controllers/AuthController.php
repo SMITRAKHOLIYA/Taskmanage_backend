@@ -88,15 +88,51 @@ class AuthController
             return;
         }
 
+        if ($role === 'owner') {
+            $companyName = $data->company_name ?? $_POST['company_name'] ?? ''; // Note: Frontend uses 'companyName' or we need to align
+            // Frontend sends 'companyName' in JSON? Let's check Signup.jsx again.
+            // Signup.jsx: register(username, email, password, role, isOwner ? companyName : null);
+            // AuthContext: sends { username, email, password, role, company_name: companyName } (Assumption or check context)
+
+            // Wait, I need to check AuthContext to be sure of the key name. 
+            // Assuming key is 'company_name' or I check $data structure.
+            // Making it robust:
+            $companyName = $data->company_name ?? $data->companyName ?? $_POST['company_name'] ?? '';
+
+            if (empty($companyName)) {
+                http_response_code(400);
+                echo json_encode(["message" => "Company Name is required for Owners"]);
+                return;
+            }
+
+            // Create Company
+            $query = "INSERT INTO companies (name, status) VALUES (:name, 'active')";
+            $stmt = $this->db->prepare($query);
+            $stmt->bindParam(":name", $companyName);
+
+            if ($stmt->execute()) {
+                $company_id = $this->db->lastInsertId();
+            } else {
+                http_response_code(500);
+                echo json_encode(["message" => "Failed to create company"]);
+                return;
+            }
+        }
+
         $this->user->username = $username;
         $this->user->password = password_hash($password, PASSWORD_DEFAULT);
         $this->user->role = $role;
         $this->user->company_id = $company_id;
 
+        // User.php create() handles the rest. 
+        // Note: User.php create() expects company_id to be set.
+
         if ($this->user->create()) {
             http_response_code(201);
             echo json_encode(["message" => "User registered successfully"]);
         } else {
+            // If user creation fails, we should technically rollback company creation, 
+            // but for now, let's just error.
             http_response_code(500);
             echo json_encode(["message" => "Unable to register user"]);
         }

@@ -113,18 +113,19 @@ class UserController
 
         // Filter by company_id
         if ($this->company_id) {
-            $query = "SELECT id, username, email, role, points, profile_pic, created_at, company_id FROM users WHERE company_id = ? ORDER BY created_at DESC";
+            $query = "SELECT u.id, u.username, u.email, u.role, u.points, u.profile_pic, u.created_at, u.company_id, c.name as company_name 
+                      FROM users u 
+                      LEFT JOIN companies c ON u.company_id = c.id
+                      WHERE u.company_id = ? 
+                      ORDER BY u.created_at DESC";
             $stmt = $this->db->prepare($query);
             $stmt->bindParam(1, $this->company_id);
         } else {
-            // If no company_id (Super Admin?), maybe show all? Or Show none?
-            // For safety, show all only if role is specifically 'owner' (Assuming Super Owner has NULL company_id? Or logic varies).
-            // Given migration assigns everyone to a company, this case is rare. 
-            // Let's default to filtering by company_id if present, else empty or all.
-            // But valid users should have company_id.
-            // If I am a legacy admin without company_id (should not happen due to migration), I might see nothing.
-            $query = "SELECT id, username, email, role, points, profile_pic, created_at, company_id FROM users ORDER BY created_at DESC";
-            $stmt = $this->db->prepare($query);
+            // SECURITY FIX: If no company_id is present (e.g. misconfigured owner), do NOT show all users.
+            // This prevents data leakage across companies.
+            http_response_code(200);
+            echo json_encode(array());
+            return;
         }
 
         $stmt->execute();
@@ -141,6 +142,7 @@ class UserController
                     "role" => $role,
                     "points" => $points,
                     "company_id" => isset($company_id) ? $company_id : null,
+                    "company_name" => isset($company_name) ? $company_name : null,
                     "profile_pic" => $profile_pic,
                     "created_at" => $created_at
                 );
@@ -164,10 +166,34 @@ class UserController
         if (!empty($data->username) && !empty($data->email) && !empty($data->password)) {
             $this->user->username = $data->username;
             $this->user->email = $data->email;
-            $this->user->password = password_hash($data->password, PASSWORD_BCRYPT);
-            $this->user->role = isset($data->role) ? $data->role : 'user';
 
-            // Assign to same company as creator
+            if ($this->user->emailExists()) {
+                http_response_code(400);
+                echo json_encode(array("message" => "Email already exists."));
+                return;
+            }
+
+            $this->user->password = password_hash($data->password, PASSWORD_BCRYPT);
+
+            // STRICT ROLE HIERARCHY
+            $requested_role = isset($data->role) ? $data->role : 'user';
+
+            // Only Owner can create Admin or Manager
+            if (($requested_role === 'admin' || $requested_role === 'manager') && $this->user_role !== 'owner') {
+                http_response_code(403);
+                echo json_encode(array("message" => "Access denied. Only Owners can create Admins or Managers."));
+                return;
+            }
+
+            $this->user->role = $requested_role;
+
+            // STRICT ENFORCEMENT: Inherit Company ID from Creator
+            if (empty($this->company_id)) {
+                http_response_code(403);
+                echo json_encode(array("message" => "Critical Error: You are not assigned to a company. Cannot create users."));
+                return;
+            }
+            // IGNORE frontend input for company_id. Trust only the session.
             $this->user->company_id = $this->company_id;
 
             if ($this->user->create()) {
@@ -269,9 +295,9 @@ class UserController
             $target_file = $target_dir . $new_filename;
 
             if (move_uploaded_file($_FILES["profile_pic"]["tmp_name"], $target_file)) {
-                // Save relative path or full URL depending on your setup. 
-                // Here saving relative path from web root.
-                $url = "/backend/uploads/" . $new_filename;
+                // Save relative path for frontend usage
+                // Frontend MEDIA_URL is .../backend/, so we just need uploads/filename
+                $url = "uploads/" . $new_filename;
                 $this->user->id = $id;
                 if ($this->user->updateProfilePic($url)) {
                     http_response_code(200);

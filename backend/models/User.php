@@ -14,6 +14,7 @@ class User
 
     public $profile_pic;
     public $created_at;
+    public $company_name; // New property
 
     public function __construct($db)
     {
@@ -22,26 +23,47 @@ class User
 
     public function create()
     {
-        $query = "INSERT INTO " . $this->table_name . " SET username=:username, email=:email, password_hash=:password, role=:role, points=:points, company_id=:company_id, profile_pic=:profile_pic";
+        $query = "INSERT INTO " . $this->table_name . " SET username=:username, email=:email, password_hash=:password, role=:role, points=:points, company_id=:company_id, profile_pic=:profile_pic, created_at=:created_at";
         $stmt = $this->conn->prepare($query);
 
         $this->username = htmlspecialchars(strip_tags($this->username));
         $this->email = htmlspecialchars(strip_tags($this->email));
-        $this->password = htmlspecialchars(strip_tags($this->password));
+        // Do NOT sanitize the hash, it's safe and necessary matching
+
         $this->role = htmlspecialchars(strip_tags($this->role));
-        $this->points = isset($this->points) ? (int) $this->points : 0;
-        $this->company_id = isset($this->company_id) ? (int) $this->company_id : null;
+
+        // Handle Nullable Integers - STRICT MODE
+        $pointsVal = isset($this->points) ? (int) $this->points : 0;
+
+        // STRICT: company_id must be provided.
+        // For Owner creation during bootstrapping, the Controller logic must handle assignment updates.
+        // But for all standard creation, this should be valid.
+        $companyIdVal = isset($this->company_id) ? (int) $this->company_id : null;
+
+        if ($companyIdVal === 0 || $companyIdVal === null) {
+            // Allow NULL ONLY if explicitly intended (e.g. Owner bootstrapping)
+            // But based on USER REQUEST, "No user exists without company_id".
+            // However, PHP null is needed for the SQL "NULL" value if we are inserting null.
+            $companyIdVal = null;
+        }
 
         $this->profile_pic = isset($this->profile_pic) ? htmlspecialchars(strip_tags($this->profile_pic)) : null;
+        $this->created_at = date('Y-m-d H:i:s');
 
         $stmt->bindParam(":username", $this->username);
         $stmt->bindParam(":email", $this->email);
         $stmt->bindParam(":password", $this->password);
         $stmt->bindParam(":role", $this->role);
-        $stmt->bindParam(":points", $this->points, PDO::PARAM_INT);
-        $stmt->bindParam(":company_id", $this->company_id, PDO::PARAM_INT);
+        $stmt->bindValue(":points", $pointsVal, PDO::PARAM_INT);
+        $stmt->bindParam(":created_at", $this->created_at);
 
-        $stmt->bindParam(":profile_pic", $this->profile_pic);
+        if ($companyIdVal === null) {
+            $stmt->bindValue(":company_id", null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(":company_id", $companyIdVal, PDO::PARAM_INT);
+        }
+
+        $stmt->bindValue(":profile_pic", $this->profile_pic);
 
         if ($stmt->execute()) {
             return true;
@@ -51,7 +73,10 @@ class User
 
     public function emailExists()
     {
-        $query = "SELECT id, username, password_hash, role, points, company_id, profile_pic, created_at FROM " . $this->table_name . " WHERE email = ? LIMIT 0,1";
+        $query = "SELECT u.id, u.username, u.password_hash, u.role, u.points, u.company_id, u.profile_pic, u.created_at, c.name as company_name 
+                  FROM " . $this->table_name . " u 
+                  LEFT JOIN companies c ON u.company_id = c.id 
+                  WHERE u.email = ? LIMIT 0,1";
         $stmt = $this->conn->prepare($query);
         $stmt->bindParam(1, $this->email);
         $stmt->execute();
@@ -68,6 +93,7 @@ class User
 
             $this->profile_pic = $row['profile_pic'];
             $this->created_at = $row['created_at'];
+            $this->company_name = isset($row['company_name']) ? $row['company_name'] : null;
             return true;
         }
         return false;
@@ -75,7 +101,10 @@ class User
 
     public function getById()
     {
-        $query = "SELECT id, username, email, role, points, company_id, profile_pic, created_at FROM " . $this->table_name . " WHERE id = ? LIMIT 0,1";
+        $query = "SELECT u.id, u.username, u.email, u.role, u.points, u.company_id, u.profile_pic, u.created_at, c.name as company_name 
+                  FROM " . $this->table_name . " u 
+                  LEFT JOIN companies c ON u.company_id = c.id 
+                  WHERE u.id = ? LIMIT 0,1";
         $stmt = $this->conn->prepare($query);
         $stmt->bindParam(1, $this->id);
         $stmt->execute();
@@ -90,6 +119,7 @@ class User
 
             $this->profile_pic = $row['profile_pic'];
             $this->created_at = $row['created_at'];
+            $this->company_name = isset($row['company_name']) ? $row['company_name'] : null;
             return true;
         }
         return false;

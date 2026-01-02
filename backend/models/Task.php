@@ -21,6 +21,7 @@ class Task
     public $questions;
     public $assigned_user_name;
     public $creator_name;
+    public $company_id; // Added for strict isolation
 
     public function __construct($db)
     {
@@ -29,7 +30,22 @@ class Task
 
     public function create()
     {
-        $query = "INSERT INTO " . $this->table_name . " SET title=:title, description=:description, priority=:priority, status=:status, due_date=:due_date, created_by=:created_by, assigned_to=:assigned_to, project_id=:project_id, parent_id=:parent_id, recurring_task_id=:recurring_task_id, questions=:questions, is_extended=0";
+        // ADD company_id to query
+        $query = "INSERT INTO " . $this->table_name . " SET 
+                    title=:title, 
+                    description=:description, 
+                    priority=:priority, 
+                    status=:status, 
+                    due_date=:due_date, 
+                    created_by=:created_by, 
+                    assigned_to=:assigned_to, 
+                    project_id=:project_id, 
+                    parent_id=:parent_id, 
+                    recurring_task_id=:recurring_task_id, 
+                    questions=:questions, 
+                    company_id=:company_id,
+                    is_extended=0";
+
         $stmt = $this->conn->prepare($query);
 
         $this->title = htmlspecialchars(strip_tags($this->title));
@@ -42,6 +58,7 @@ class Task
         $this->project_id = !empty($this->project_id) ? htmlspecialchars(strip_tags($this->project_id)) : null;
         $this->parent_id = !empty($this->parent_id) ? htmlspecialchars(strip_tags($this->parent_id)) : null;
         $this->recurring_task_id = !empty($this->recurring_task_id) ? htmlspecialchars(strip_tags($this->recurring_task_id)) : null;
+        $this->company_id = !empty($this->company_id) ? htmlspecialchars(strip_tags($this->company_id)) : null;
 
         // questions is JSON
         if (is_array($this->questions) || is_object($this->questions)) {
@@ -61,6 +78,15 @@ class Task
         $stmt->bindParam(":project_id", $this->project_id);
         $stmt->bindParam(":parent_id", $this->parent_id);
         $stmt->bindParam(":recurring_task_id", $this->recurring_task_id);
+        $stmt->bindParam(":recurring_task_id", $this->recurring_task_id);
+
+        if ($this->company_id === null) {
+            $stmt->bindValue(":company_id", null, PDO::PARAM_NULL);
+        } else {
+            $stmt->bindValue(":company_id", $this->company_id, PDO::PARAM_INT);
+        }
+
+        $stmt->bindParam(":questions", $this->questions);
         $stmt->bindParam(":questions", $this->questions);
 
         if ($stmt->execute()) {
@@ -201,10 +227,13 @@ class Task
                   WHERE t.deleted_at IS NULL";
 
         // Role Restriction
-        if ($role === 'owner' && $company_id) {
-            // Owner sees tasks where creator belongs to their company
-            $query .= " AND c.company_id = :company_id";
-        } elseif ($role !== 'admin' && $role !== 'manager') {
+        // Unified Company Isolation: Everyone sees only their company's tasks
+        if ($company_id) {
+            $query .= " AND t.company_id = :company_id";
+        }
+
+        // Additional Role Restrictions
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
         }
 
@@ -242,9 +271,12 @@ class Task
         $stmt = $this->conn->prepare($query);
 
         // Bind Parameters
-        if ($role === 'owner' && $company_id) {
+        // Bind Parameters
+        if ($company_id) {
             $stmt->bindParam(":company_id", $company_id);
-        } elseif ($role !== 'admin' && $role !== 'manager') {
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $stmt->bindParam(":user_id", $user_id);
         }
 
@@ -286,9 +318,12 @@ class Task
                   LEFT JOIN users c ON t.created_by = c.id
                   WHERE t.deleted_at IS NULL";
 
-        if ($role === 'owner' && $company_id) {
-            $query .= " AND c.company_id = :company_id";
-        } elseif ($role !== 'admin' && $role !== 'manager') {
+        // Unified Company Isolation
+        if ($company_id) {
+            $query .= " AND t.company_id = :company_id";
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
         }
 
@@ -314,9 +349,11 @@ class Task
 
         $stmt = $this->conn->prepare($query);
 
-        if ($role === 'owner' && $company_id) {
+        if ($company_id) {
             $stmt->bindParam(":company_id", $company_id);
-        } elseif ($role !== 'admin' && $role !== 'manager') {
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $stmt->bindParam(":user_id", $user_id);
         }
 
@@ -357,7 +394,7 @@ class Task
     }
 
     // Get Trash
-    public function getTrash($user_id, $role)
+    public function getTrash($user_id, $role, $company_id = null)
     {
         $query = "SELECT t.*, u.username as assigned_user_name, c.username as creator_name 
                   FROM " . $this->table_name . " t 
@@ -365,7 +402,12 @@ class Task
                   LEFT JOIN users c ON t.created_by = c.id
                   WHERE t.deleted_at IS NOT NULL";
 
-        if ($role !== 'admin' && $role !== 'manager') {
+        // Unified Company Isolation
+        if ($company_id) {
+            $query .= " AND t.company_id = :company_id";
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
         }
 
@@ -373,7 +415,11 @@ class Task
 
         $stmt = $this->conn->prepare($query);
 
-        if ($role !== 'admin' && $role !== 'manager') {
+        if ($company_id) {
+            $stmt->bindParam(":company_id", $company_id);
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $stmt->bindParam(":user_id", $user_id);
         }
 
@@ -420,17 +466,22 @@ class Task
                   LEFT JOIN users c ON t.created_by = c.id
                   WHERE t.deleted_at IS NULL";
 
-        if ($role === 'owner' && $company_id) {
-            $query .= " AND c.company_id = :company_id";
-        } elseif ($role !== 'admin' && $role !== 'manager') {
+        // Unified Company Isolation
+        if ($company_id) {
+            $query .= " AND t.company_id = :company_id";
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $query .= " AND (t.assigned_to = :user_id OR t.created_by = :user_id)";
         }
 
         $stmt = $this->conn->prepare($query);
 
-        if ($role === 'owner' && $company_id) {
+        if ($company_id) {
             $stmt->bindParam(":company_id", $company_id);
-        } elseif ($role !== 'admin' && $role !== 'manager') {
+        }
+
+        if ($role !== 'owner' && $role !== 'admin' && $role !== 'manager') {
             $stmt->bindParam(":user_id", $user_id);
         }
 
