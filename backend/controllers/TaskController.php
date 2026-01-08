@@ -74,7 +74,8 @@ class TaskController
             'priority' => isset($_GET['priority']) ? $_GET['priority'] : '',
             'status' => isset($_GET['status']) ? $_GET['status'] : '',
             'project_id' => isset($_GET['project_id']) ? $_GET['project_id'] : '',
-            'parent_id' => isset($_GET['parent_id']) ? $_GET['parent_id'] : ''
+            'parent_id' => isset($_GET['parent_id']) ? $_GET['parent_id'] : '',
+            'exclude_status' => isset($_GET['exclude_status']) ? $_GET['exclude_status'] : ''
         ];
 
         $stmt = $this->task->getAll($this->user_id, $this->user_role, $params, $this->company_id);
@@ -145,8 +146,11 @@ class TaskController
                 "creator_name" => $this->task->creator_name ?? null,
                 "created_at" => $this->task->created_at,
                 "project_id" => $this->task->project_id,
+                "project_title" => $this->task->project_title ?? null, // Add project title
                 "parent_id" => $this->task->parent_id,
-                "questions" => $this->task->questions_id ?? null,
+                "parent_task_title" => $this->task->parent_task_title ?? null, // Add parent task title
+                "recurring_task_id" => $this->task->recurring_task_id ?? null,
+                "questions" => $this->task->questions ?? null,
             );
             // Note: getById in Task.php fetches joined names, so they should be available in the row returned.
             // But Task.php getById returns the row, it also sets properties.
@@ -203,6 +207,7 @@ class TaskController
             $this->task->parent_id = !empty($data->parent_id) ? $data->parent_id : null;
             $this->task->questions = isset($data->questions) ? $data->questions : null;
             $this->task->company_id = $this->company_id; // Assign company_id from session
+            $this->task->requires_execution_workflow = isset($data->requires_execution_workflow) ? $data->requires_execution_workflow : 0; // Default to false
 
             error_log("Creating task: " . json_encode($data));
             error_log("Task Object: " . json_encode($this->task));
@@ -255,23 +260,64 @@ class TaskController
 
         $this->task->id = $id;
 
-        // Check if task exists and user has permission
         if ($this->task->getById()) {
-            // Allow update if admin, manager, or assigned user/creator
-// For simplicity, we allow basic updates. In real app, restrict fields based on role.
-
             $oldStatus = $this->task->status;
             $newStatus = $data->status ?? $this->task->status;
 
+            // PERMISSIONS
+            $isManager = in_array($this->user_role, ['admin', 'manager', 'owner']);
+            $isAssignee = ($this->task->assigned_to == $this->user_id);
+
+            // 1. Status Change Check
+            if ($oldStatus !== $newStatus) {
+                // If not manager and not assignee, can't change status generally (though getOne usually limits access already)
+                // But specifically:
+
+                // If Manager is changing status and is NOT assignee: Require Reason
+                if ($isManager && !$isAssignee) {
+                    $note = $data->note ?? $data->override_reason ?? '';
+                    if (empty($note) || trim($note) === '') {
+                        http_response_code(403);
+                        echo json_encode(["message" => "Changing status requires an override reason."]);
+                        return;
+                    }
+                    // Save to task model
+                    $this->task->last_override_reason = $note;
+
+                    // Log the override
+                    $this->activityLog->create($this->user_id, "Status Override", "Changed status from $oldStatus to $newStatus. Reason: $note", $this->task->id);
+                }
+
+                // Existing logic regarding reverting logic...
+                if (!$isManager && $oldStatus !== $newStatus) {
+                    if ($oldStatus === 'completed') {
+                        http_response_code(403);
+                        echo json_encode(["message" => "Cannot revert completed task."]);
+                        return;
+                    }
+                    if ($oldStatus === 'in_progress' && $newStatus === 'pending') {
+                        http_response_code(403);
+                        echo json_encode(["message" => "Cannot move task back to pending."]);
+                        return;
+                    }
+                }
+            }
+
+            // Assign other fields...
             $this->task->title = $data->title ?? $this->task->title;
             $this->task->description = $data->description ?? $this->task->description;
             $this->task->priority = $data->priority ?? $this->task->priority;
-            $this->task->status = $newStatus;
             $this->task->due_date = $data->due_date ?? $this->task->due_date;
             $this->task->assigned_to = $data->assigned_to ?? $this->task->assigned_to;
             $this->task->project_id = $data->project_id ?? $this->task->project_id;
             $this->task->parent_id = $data->parent_id ?? $this->task->parent_id;
             $this->task->questions = isset($data->questions) ? $data->questions : $this->task->questions;
+            $this->task->status = $newStatus;
+
+            // Allow Admin/Manager/Owner to toggle workflow requirement
+            if (in_array($this->user_role, ['admin', 'manager', 'owner'])) {
+                $this->task->requires_execution_workflow = isset($data->requires_execution_workflow) ? $data->requires_execution_workflow : $this->task->requires_execution_workflow;
+            }
 
             if ($this->task->update()) {
                 // Award points if task is completed and wasn't before
@@ -496,6 +542,155 @@ class TaskController
 
         http_response_code(200);
         echo json_encode($stats);
+    }
+
+    /* =======================
+       EXECUTION WORKFLOW
+     ======================= */
+    public function updateStage($id)
+    {
+        $this->authenticate();
+        $this->task->id = $id;
+
+        if (!$this->task->getById()) {
+            http_response_code(404);
+            echo json_encode(["message" => "Task not found."]);
+            return;
+        }
+
+        // PERMISSIONS:
+        // - Assigned User: Can execute steps sequentially.
+        // - Admin/Owner/Manager: Can OVERRIDE steps but MUST provide a reason.
+
+        $isManager = in_array($this->user_role, ['admin', 'manager', 'owner']);
+        $isAssignee = ($this->task->assigned_to == $this->user_id);
+
+        if (!$isManager && !$isAssignee) {
+            http_response_code(403);
+            echo json_encode(["message" => "Access denied. You are not assigned to this task."]);
+            return;
+        }
+
+        $data = json_decode(file_get_contents("php://input"));
+        $newStage = $data->stage ?? '';
+        $note = $data->note ?? ''; // This acts as the "Reason" for managers
+
+        if (empty($newStage)) {
+            http_response_code(400);
+            echo json_encode(["message" => "New stage required."]);
+            return;
+        }
+
+        // ENFORCE OVERRIDE REASON
+        if ($isManager && !$isAssignee) {
+            if (empty($note) || trim($note) === '') {
+                http_response_code(403);
+                echo json_encode(["message" => "Management override requires a documented reason."]);
+                return;
+            }
+            // Save to task model to persist in DB
+            $this->task->last_override_reason = $note;
+        } else {
+            // Optional: Clear override reason if assignee is successful? 
+            // Or keep history. Let's keep it until next override.
+            // If we want to clear it when assignee acknowledges or moves forward:
+            // $this->task->last_override_reason = null; 
+        }
+
+        $currentStage = $this->task->execution_stage;
+
+        // Log Logic
+        $logAction = ($isManager && !$isAssignee) ? "Stage Override" : "Stage Updated";
+        $logMessage = "Moved from $currentStage to $newStage";
+        if ($isManager && !$isAssignee) {
+            $logMessage .= " [OVERRIDE REASON: $note]";
+        }
+
+        // TRANSITION LOGIC
+        switch ($newStage) {
+            case 'started':
+                // Can start if not started
+                if ($currentStage !== 'not_started' && !$isManager) {
+                    $this->sendError("Task already started.");
+                    return;
+                }
+                $this->task->execution_stage = 'started';
+                $this->task->started_at = date('Y-m-d H:i:s');
+                $this->task->status = 'in_progress'; // Auto-move status
+                break;
+
+            case 'local_done':
+                // Must be started
+                if ($currentStage !== 'started' && !$isManager) {
+                    $this->sendError("Task must be started first.");
+                    return;
+                }
+                $this->task->execution_stage = 'local_done';
+                $this->task->local_run_at = date('Y-m-d H:i:s');
+                // Status stays in_progress
+                break;
+
+            case 'live_done':
+                // Must be local_done
+                if ($currentStage !== 'local_done' && !$isManager) {
+                    $this->sendError("Task must be locally tested first.");
+                    return;
+                }
+                $this->task->execution_stage = 'live_done';
+                $this->task->live_run_at = date('Y-m-d H:i:s');
+                break;
+
+            case 'review':
+                // Special step: Move status to waiting_for_review. No stage change strictly, but implies flow done.
+                if ($currentStage !== 'live_done' && !$isManager) {
+                    $this->sendError("Task must be deployed live first.");
+                    return;
+                }
+                $this->task->status = 'waiting_for_review';
+                break;
+
+            case 'completed':
+                // Allow direct completion if live done
+                if ($currentStage !== 'live_done' && $this->task->status !== 'waiting_for_review' && !$isManager) {
+                    $this->sendError("Task cannot be completed yet.");
+                    return;
+                }
+                $this->task->status = 'completed';
+                $this->task->completed_at = date('Y-m-d H:i:s');
+                break;
+
+            // Allow reverting for managers (Backward compatibility with override)
+            case 'not_started':
+                if (!$isManager) {
+                    $this->sendError("Only managers can reset tasks.");
+                    return;
+                }
+                $this->task->execution_stage = 'not_started';
+                $this->task->status = 'pending';
+                break;
+
+            default:
+                $this->sendError("Invalid stage transition.");
+                return;
+        }
+
+        if ($this->task->update()) {
+            // Include note in validation logs for everyone if provided
+            $finalLog = $logMessage . ($note && !($isManager && !$isAssignee) ? " Note: $note" : "");
+
+            $this->activityLog->create($this->user_id, $logAction, $finalLog, $this->task->id);
+            http_response_code(200);
+            echo json_encode(["message" => "Stage updated successfully.", "stage" => $newStage]);
+        } else {
+            http_response_code(503);
+            echo json_encode(["message" => "Unable to update stage."]);
+        }
+    }
+
+    private function sendError($msg)
+    {
+        http_response_code(400);
+        echo json_encode(["message" => $msg]);
     }
 }
 ?>

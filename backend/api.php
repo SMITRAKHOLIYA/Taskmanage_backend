@@ -4,24 +4,19 @@
    CORS (PRODUCTION)
  ======================= */
 header("Content-Type: application/json");
-$allowed_origins = [
-    "https://taskmanage.iceiy.com",
-    "http://localhost:5173",
-    "http://localhost:4173"
-];
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowed_origins)) {
-    header("Access-Control-Allow-Origin: $origin");
-} else {
-    header("Access-Control-Allow-Origin: https://taskmanage.iceiy.com"); // Fallback
-}
+
+// Allow generic CORS if origin not present
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
+
+header("Access-Control-Allow-Origin: $origin");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
+
 
 /* =======================
    LOAD CORE FILES
@@ -65,9 +60,10 @@ if (strpos($requestUri, $scriptName) === 0) {
     }
 }
 
-$cleanPath = trim($cleanPath, '/');
+
 
 // Split path into segments
+$cleanPath = trim($cleanPath, '/');
 $segments = $cleanPath === '' ? [] : explode('/', $cleanPath);
 
 // Assign routing variables
@@ -136,6 +132,38 @@ try {
 
         /* ---------- TASKS ---------- */
         case 'tasks':
+            // Check for Comments/Attachments sub-resources FIRST
+            if ($id && $action === 'comments') {
+                require_once __DIR__ . "/controllers/CommentController.php";
+                $commentController = new CommentController();
+                if ($method === 'GET') {
+                    $commentController->getComments($id);
+                } elseif ($method === 'POST') {
+                    $data = json_decode(file_get_contents("php://input"));
+                    if (!$data)
+                        $data = new stdClass();
+                    $data->task_id = $id; // Inject task ID from URL
+                    $commentController->addComment($data);
+                }
+                break;
+            }
+            if ($id && $action === 'attachments') {
+                require_once __DIR__ . "/controllers/CommentController.php";
+                $commentController = new CommentController();
+                if ($method === 'GET') {
+                    $commentController->getAttachments($id);
+                } elseif ($method === 'POST') {
+                    // Handle file upload
+                    if (isset($_FILES['file'])) {
+                        $commentController->uploadAttachment($id, $_FILES['file']);
+                    } else {
+                        http_response_code(400);
+                        echo json_encode(["message" => "No file uploaded"]);
+                    }
+                }
+                break;
+            }
+
             require_once __DIR__ . "/controllers/TaskController.php";
             $controller = new TaskController();
             if ($method === "GET") {
@@ -151,6 +179,8 @@ try {
             } elseif ($method === "POST") {
                 if ($id && $action === "extend") {
                     $controller->extendDeadline($id);
+                } elseif ($id && $action === "update-stage") {
+                    $controller->updateStage($id);
                 } else {
                     $controller->create();
                 }
@@ -223,13 +253,19 @@ try {
 
         /* ---------- ANALYTICS ---------- */
         case 'analytics':
-            require_once __DIR__ . "/controllers/AnalyticsController.php";
-            $controller = new AnalyticsController();
-            if ($method === "GET") {
-                if ($action === "overall-stats") {
-                    $controller->getOverallStats();
-                } else {
-                    $controller->getAdminReport();
+            if ($action === "performance" && $method === "GET") {
+                require_once __DIR__ . "/controllers/PerformanceController.php";
+                $controller = new PerformanceController();
+                $controller->getPerformanceMetrics();
+            } else {
+                require_once __DIR__ . "/controllers/AnalyticsController.php";
+                $controller = new AnalyticsController();
+                if ($method === "GET") {
+                    if ($action === "overall-stats") {
+                        $controller->getOverallStats();
+                    } else {
+                        $controller->getAdminReport();
+                    }
                 }
             }
             break;
@@ -287,6 +323,18 @@ try {
                 }
             } elseif ($method === "POST") {
                 $controller->save();
+            }
+            break;
+
+        /* ---------- SYNC ---------- */
+        case 'sync':
+            require_once __DIR__ . "/controllers/SyncController.php";
+            $controller = new SyncController();
+            if ($method === "GET") {
+                $controller->getSyncStatus();
+            } else {
+                http_response_code(405);
+                echo json_encode(["message" => "Method not allowed"]);
             }
             break;
 

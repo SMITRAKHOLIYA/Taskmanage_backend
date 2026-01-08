@@ -97,7 +97,10 @@ class AuthController
             // Wait, I need to check AuthContext to be sure of the key name. 
             // Assuming key is 'company_name' or I check $data structure.
             // Making it robust:
+            // Making it robust:
             $companyName = $data->company_name ?? $data->companyName ?? $_POST['company_name'] ?? '';
+            $companySize = $data->company_size ?? $data->companySize ?? $_POST['company_size'] ?? NULL;
+            $industry = $data->industry ?? $_POST['industry'] ?? NULL;
 
             if (empty($companyName)) {
                 http_response_code(400);
@@ -106,9 +109,11 @@ class AuthController
             }
 
             // Create Company
-            $query = "INSERT INTO companies (name, status) VALUES (:name, 'active')";
+            $query = "INSERT INTO companies (name, company_size, industry, status) VALUES (:name, :company_size, :industry, 'active')";
             $stmt = $this->db->prepare($query);
             $stmt->bindParam(":name", $companyName);
+            $stmt->bindParam(":company_size", $companySize);
+            $stmt->bindParam(":industry", $industry);
 
             if ($stmt->execute()) {
                 $company_id = $this->db->lastInsertId();
@@ -124,17 +129,32 @@ class AuthController
         $this->user->role = $role;
         $this->user->company_id = $company_id;
 
-        // User.php create() handles the rest. 
-        // Note: User.php create() expects company_id to be set.
-
         if ($this->user->create()) {
             http_response_code(201);
-            echo json_encode(["message" => "User registered successfully"]);
+            echo json_encode(["message" => "User registered successfully", "user" => ["role" => $role, "id" => $this->user->id]]);
         } else {
-            // If user creation fails, we should technically rollback company creation, 
-            // but for now, let's just error.
             http_response_code(500);
             echo json_encode(["message" => "Unable to register user"]);
+        }
+    }
+
+    public function getCompanyDetails()
+    {
+        $id = isset($_GET['id']) ? $_GET['id'] : die();
+
+        $query = "SELECT id, name FROM companies WHERE id = :id LIMIT 1";
+        $stmt = $this->db->prepare($query);
+        $stmt->bindParam(":id", $id);
+        $stmt->execute();
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row) {
+            http_response_code(200);
+            echo json_encode($row);
+        } else {
+            http_response_code(404);
+            echo json_encode(["message" => "Company not found."]);
         }
     }
 }

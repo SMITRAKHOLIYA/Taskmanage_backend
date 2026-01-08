@@ -21,7 +21,17 @@ class Task
     public $questions;
     public $assigned_user_name;
     public $creator_name;
-    public $company_id; // Added for strict isolation
+    public $execution_stage;
+    public $started_at;
+    public $local_run_at;
+    public $live_run_at;
+    public $completed_at;
+    public $requires_execution_workflow;
+    public $company_id; // Added to fix lint warnings
+    public $project_title; // Added for mapped fields
+    public $parent_task_title; // Added for mapped fields // New property
+
+    public $last_override_reason; // New property
 
     public function __construct($db)
     {
@@ -44,7 +54,9 @@ class Task
                     recurring_task_id=:recurring_task_id, 
                     questions=:questions, 
                     company_id=:company_id,
-                    is_extended=0";
+                    requires_execution_workflow=:requires_execution_workflow,
+                    is_extended=0,
+                    last_override_reason=NULL";
 
         $stmt = $this->conn->prepare($query);
 
@@ -59,6 +71,7 @@ class Task
         $this->parent_id = !empty($this->parent_id) ? htmlspecialchars(strip_tags($this->parent_id)) : null;
         $this->recurring_task_id = !empty($this->recurring_task_id) ? htmlspecialchars(strip_tags($this->recurring_task_id)) : null;
         $this->company_id = !empty($this->company_id) ? htmlspecialchars(strip_tags($this->company_id)) : null;
+        $this->requires_execution_workflow = isset($this->requires_execution_workflow) ? (int) $this->requires_execution_workflow : 0;
 
         // questions is JSON
         if (is_array($this->questions) || is_object($this->questions)) {
@@ -78,7 +91,7 @@ class Task
         $stmt->bindParam(":project_id", $this->project_id);
         $stmt->bindParam(":parent_id", $this->parent_id);
         $stmt->bindParam(":recurring_task_id", $this->recurring_task_id);
-        $stmt->bindParam(":recurring_task_id", $this->recurring_task_id);
+        $stmt->bindParam(":requires_execution_workflow", $this->requires_execution_workflow);
 
         if ($this->company_id === null) {
             $stmt->bindValue(":company_id", null, PDO::PARAM_NULL);
@@ -86,7 +99,6 @@ class Task
             $stmt->bindValue(":company_id", $this->company_id, PDO::PARAM_INT);
         }
 
-        $stmt->bindParam(":questions", $this->questions);
         $stmt->bindParam(":questions", $this->questions);
 
         if ($stmt->execute()) {
@@ -105,10 +117,13 @@ class Task
      */
     public function getById()
     {
-        $query = "SELECT t.*, u.username as assigned_user_name, c.username as creator_name
+        $query = "SELECT t.*, u.username as assigned_user_name, c.username as creator_name,
+                         p.title as project_title, parent.title as parent_task_title
                   FROM " . $this->table_name . " t
                   LEFT JOIN users u ON t.assigned_to = u.id
                   LEFT JOIN users c ON t.created_by = c.id
+                  LEFT JOIN projects p ON t.project_id = p.id
+                  LEFT JOIN tasks parent ON t.parent_id = parent.id
                   WHERE t.id = :id
                   LIMIT 1";
 
@@ -130,12 +145,21 @@ class Task
             $this->updated_at = $row['updated_at'];
             $this->is_extended = $row['is_extended']; // Populate is_extended
             $this->project_id = $row['project_id'];
+            $this->project_title = $row['project_title']; // Mapped project title
             $this->parent_id = $row['parent_id'];
+            $this->parent_task_title = $row['parent_task_title']; // Mapped parent task title
             $this->recurring_task_id = $row['recurring_task_id'];
             $this->questions = $row['questions'];
             // keep extra joined fields available to controller if needed
             $this->assigned_user_name = $row['assigned_user_name'];
             $this->creator_name = $row['creator_name'];
+            $this->execution_stage = $row['execution_stage'];
+            $this->started_at = $row['started_at'];
+            $this->local_run_at = $row['local_run_at'];
+            $this->live_run_at = $row['live_run_at'];
+            $this->completed_at = $row['completed_at'];
+            $this->requires_execution_workflow = $row['requires_execution_workflow'];
+            $this->last_override_reason = $row['last_override_reason']; // Populate last_override_reason
             return $row;
         }
         return false;
@@ -156,7 +180,14 @@ class Task
                       is_extended = :is_extended,
                       project_id = :project_id,
                       parent_id = :parent_id,
-                      questions = :questions
+                      questions = :questions,
+                      execution_stage = :execution_stage,
+                      started_at = :started_at,
+                      local_run_at = :local_run_at,
+                      live_run_at = :live_run_at,
+                      completed_at = :completed_at,
+                      requires_execution_workflow = :requires_execution_workflow,
+                      last_override_reason = :last_override_reason
                   WHERE id = :id";
 
         $stmt = $this->conn->prepare($query);
@@ -171,6 +202,10 @@ class Task
         $this->is_extended = isset($this->is_extended) ? (int) $this->is_extended : 0;
         $this->project_id = !empty($this->project_id) ? htmlspecialchars(strip_tags($this->project_id)) : null;
         $this->parent_id = !empty($this->parent_id) ? htmlspecialchars(strip_tags($this->parent_id)) : null;
+        $this->requires_execution_workflow = isset($this->requires_execution_workflow) ? (int) $this->requires_execution_workflow : 0;
+
+        // Ensure last_override_reason is handled properly (null if not set)
+        $this->last_override_reason = !empty($this->last_override_reason) ? htmlspecialchars(strip_tags($this->last_override_reason)) : null;
 
         // questions is JSON
         if (is_array($this->questions) || is_object($this->questions)) {
@@ -191,6 +226,13 @@ class Task
         $stmt->bindParam(":project_id", $this->project_id);
         $stmt->bindParam(":parent_id", $this->parent_id);
         $stmt->bindParam(":questions", $this->questions);
+        $stmt->bindParam(":execution_stage", $this->execution_stage);
+        $stmt->bindParam(":started_at", $this->started_at);
+        $stmt->bindParam(":local_run_at", $this->local_run_at);
+        $stmt->bindParam(":live_run_at", $this->live_run_at);
+        $stmt->bindParam(":completed_at", $this->completed_at);
+        $stmt->bindParam(":requires_execution_workflow", $this->requires_execution_workflow);
+        $stmt->bindParam(":last_override_reason", $this->last_override_reason);
 
         if ($stmt->execute()) {
             return true;
@@ -212,6 +254,7 @@ class Task
         $status = isset($params['status']) ? $params['status'] : '';
         $project_id = isset($params['project_id']) ? $params['project_id'] : '';
         $parent_id = isset($params['parent_id']) ? $params['parent_id'] : '';
+        $exclude_status = isset($params['exclude_status']) ? $params['exclude_status'] : '';
 
         // Allowed sort columns
         $allowed_sorts = ['title', 'due_date', 'priority', 'created_at', 'assigned_to'];
@@ -257,6 +300,9 @@ class Task
                 $query .= " AND t.parent_id = :parent_id";
             }
         }
+        if (!empty($exclude_status)) {
+            $query .= " AND t.status != :exclude_status";
+        }
 
         // Sorting
         if ($sort_by === 'assigned_to') {
@@ -296,6 +342,9 @@ class Task
         if (isset($params['parent_id']) && $params['parent_id'] !== '' && $parent_id !== 'null') {
             $stmt->bindParam(":parent_id", $parent_id);
         }
+        if (!empty($exclude_status)) {
+            $stmt->bindParam(":exclude_status", $exclude_status);
+        }
 
         $stmt->bindParam(":limit", $limit, PDO::PARAM_INT);
         $stmt->bindParam(":offset", $offset, PDO::PARAM_INT);
@@ -312,6 +361,7 @@ class Task
         $status = isset($params['status']) ? $params['status'] : '';
         $project_id = isset($params['project_id']) ? $params['project_id'] : '';
         $parent_id = isset($params['parent_id']) ? $params['parent_id'] : '';
+        $exclude_status = isset($params['exclude_status']) ? $params['exclude_status'] : '';
 
         // Base query with joins for filtering
         $query = "SELECT COUNT(*) as total FROM " . $this->table_name . " t 
@@ -346,6 +396,9 @@ class Task
                 $query .= " AND t.parent_id = :parent_id";
             }
         }
+        if (!empty($exclude_status)) {
+            $query .= " AND t.status != :exclude_status";
+        }
 
         $stmt = $this->conn->prepare($query);
 
@@ -372,6 +425,9 @@ class Task
         }
         if (isset($params['parent_id']) && $params['parent_id'] !== '' && $parent_id !== 'null') {
             $stmt->bindParam(":parent_id", $parent_id);
+        }
+        if (!empty($exclude_status)) {
+            $stmt->bindParam(":exclude_status", $exclude_status);
         }
 
         $stmt->execute();

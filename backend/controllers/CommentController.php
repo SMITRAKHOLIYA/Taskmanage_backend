@@ -63,10 +63,18 @@ class CommentController
 
     public function addComment($data)
     {
-        $this->comment->task_id = $data->task_id;
-        $this->comment->user_id = $data->user_id;
+        $this->authenticate(); // Ensure user is authenticated
+
+        $this->comment->task_id = $data->task_id ?? null; // task_id might be set in api.php injection or from data
+        $this->comment->user_id = $this->user_id; // Use authenticated user
         $this->comment->content = $data->content;
         $this->comment->context_id = $data->context_id ?? null;
+
+        if (!$this->comment->task_id) {
+            http_response_code(400);
+            echo json_encode(['message' => 'Task ID is required']);
+            return;
+        }
 
         if ($this->comment->create()) {
             echo json_encode(['message' => 'Comment added']);
@@ -78,13 +86,17 @@ class CommentController
 
     public function getAttachments($taskId)
     {
+        $this->authenticate();
         $stmt = $this->attachment->getByTask($taskId);
         $attachments = $stmt->fetchAll(PDO::FETCH_ASSOC);
         echo json_encode($attachments);
     }
 
-    public function uploadAttachment($taskId, $userId, $file)
+    public function uploadAttachment($taskId, $file)
     {
+        $this->authenticate();
+        $userId = $this->user_id;
+
         $targetDir = __DIR__ . "/../uploads/";
         if (!file_exists($targetDir)) {
             mkdir($targetDir, 0777, true);
