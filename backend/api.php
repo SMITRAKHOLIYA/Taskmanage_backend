@@ -24,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 require_once __DIR__ . "/config/db.php";
 require_once __DIR__ . "/utils/JWTHandler.php";
 
+
 /* =======================
    ROUTE NORMALIZATIONk
    FIX FOR AEONFREE
@@ -326,6 +327,7 @@ try {
             }
             break;
 
+
         /* ---------- SYNC ---------- */
         case 'sync':
             require_once __DIR__ . "/controllers/SyncController.php";
@@ -337,6 +339,75 @@ try {
                 echo json_encode(["message" => "Method not allowed"]);
             }
             break;
+
+        /* ---------- CUSTOMERS ---------- */
+        case 'customers':
+            require_once __DIR__ . "/controllers/CustomerController.php";
+            $controller = new CustomerController();
+            if ($method === "GET") {
+                $id ? $controller->getOne($id) : $controller->getAll();
+            } elseif ($method === "POST") {
+                $controller->create();
+            } elseif ($method === "PUT" && $id) {
+                $controller->update($id);
+            } elseif ($method === "DELETE" && $id) {
+                $controller->delete($id);
+            }
+            break;
+
+        /* ---------- CUSTOMER GROUPS ---------- */
+        case 'customer-groups':
+            require_once __DIR__ . "/controllers/CustomerGroupController.php";
+            $controller = new CustomerGroupController();
+            if ($method === "GET") {
+                $id ? $controller->getOne($id) : $controller->getAll();
+            } elseif ($method === "POST") {
+                $controller->create();
+            } elseif ($method === "PUT" && $id) {
+                $controller->update($id);
+            } elseif ($method === "DELETE" && $id) {
+                $controller->delete($id);
+            }
+            break;
+
+        /* ---------- GROUP PERSONS ---------- */
+        case 'group-persons':
+            require_once __DIR__ . "/controllers/GroupPersonController.php";
+            $controller = new GroupPersonController();
+            if ($method === "GET") {
+                if ($action === 'group' && is_numeric($subAction)) {
+                    $controller->getByGroup($subAction);
+                } elseif ($id) {
+                    $controller->getOne($id);
+                }
+            } elseif ($method === "POST") {
+                $controller->create();
+            } elseif ($method === "PUT" && $id) {
+                $controller->update($id);
+            } elseif ($method === "DELETE" && $id) {
+                $controller->delete($id);
+            }
+            break;
+
+        /* ---------- LINKED COMPANIES ---------- */
+        case 'linked-companies':
+            require_once __DIR__ . "/controllers/LinkedCompanyController.php";
+            $controller = new LinkedCompanyController();
+            if ($method === "GET") {
+                if ($action === 'owner' && $subAction && isset($segments[3])) {
+                    // /linked-companies/owner/customer/123
+                    $controller->getByOwner($subAction, $segments[3]);
+                }
+            } elseif ($method === "POST") {
+                $controller->create();
+            } elseif ($method === "PUT" && $id) {
+                $controller->update($id);
+            } elseif ($method === "DELETE" && $id) {
+                $controller->delete($id);
+            }
+            break;
+
+
 
 
         default:
