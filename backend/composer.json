@@ -1,0 +1,16 @@
+{
+    "name": "taskmanage/backend",
+    "description": "Backend for Task Management System",
+    "type": "project",
+    "autoload": {
+        "classmap": [
+            "./"
+        ]
+    },
+    "authors": [
+        {
+            "name": "Developer",
+            "email": "dev@example.com"
+        }
+    ]
+}
