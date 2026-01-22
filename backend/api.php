@@ -131,6 +131,24 @@ try {
             }
             break;
 
+
+
+        case 'invites':
+            require_once __DIR__ . "/controllers/InviteController.php";
+            $controller = new InviteController();
+            if ($method === "POST") {
+                if ($action === 'complete') {
+                    $controller->completeRegistration();
+                } else {
+                    $controller->invite();
+                }
+            } elseif ($method === "GET") {
+                if ($action === 'verify') {
+                    $controller->verifyInvite();
+                }
+            }
+            break;
+
         /* ---------- TASKS ---------- */
         case 'tasks':
             // Check for Comments/Attachments sub-resources FIRST

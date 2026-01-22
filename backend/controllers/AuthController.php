@@ -22,11 +22,12 @@ class AuthController
 
     public function login()
     {
-        $data = json_decode(file_get_contents("php://input"));
+        $input = file_get_contents("php://input");
+        $data = json_decode($input);
 
-        // Handle both JSON and Form Data
-        $email = $data->email ?? $_POST['email'] ?? '';
-        $password = $data->password ?? $_POST['password'] ?? '';
+        // Handle both JSON and Form Data safely
+        $email = ($data && isset($data->email)) ? $data->email : ($_POST['email'] ?? '');
+        $password = ($data && isset($data->password)) ? $data->password : ($_POST['password'] ?? '');
 
         if (empty($email) || empty($password)) {
             http_response_code(400);
@@ -66,14 +67,15 @@ class AuthController
 
     public function register()
     {
-        $data = json_decode(file_get_contents("php://input"));
+        $input = file_get_contents("php://input");
+        $data = json_decode($input);
 
         // Handle both JSON and Form Data
-        $username = $data->username ?? $_POST['username'] ?? '';
-        $email = $data->email ?? $_POST['email'] ?? '';
-        $password = $data->password ?? $_POST['password'] ?? '';
-        $role = $data->role ?? $_POST['role'] ?? 'user';
-        $company_id = $data->company_id ?? $_POST['company_id'] ?? null;
+        $username = ($data && isset($data->username)) ? $data->username : ($_POST['username'] ?? '');
+        $email = ($data && isset($data->email)) ? $data->email : ($_POST['email'] ?? '');
+        $password = ($data && isset($data->password)) ? $data->password : ($_POST['password'] ?? '');
+        $role = ($data && isset($data->role)) ? $data->role : ($_POST['role'] ?? 'user');
+        $company_id = ($data && isset($data->company_id)) ? $data->company_id : ($_POST['company_id'] ?? null);
 
         if (empty($username) || empty($email) || empty($password)) {
             http_response_code(400);
@@ -98,9 +100,15 @@ class AuthController
             // Assuming key is 'company_name' or I check $data structure.
             // Making it robust:
             // Making it robust:
-            $companyName = $data->company_name ?? $data->companyName ?? $_POST['company_name'] ?? '';
-            $companySize = $data->company_size ?? $data->companySize ?? $_POST['company_size'] ?? NULL;
-            $industry = $data->industry ?? $_POST['industry'] ?? NULL;
+            $companyName = ($data && isset($data->company_name)) ? $data->company_name :
+                (($data && isset($data->companyName)) ? $data->companyName :
+                    ($_POST['company_name'] ?? ''));
+
+            $companySize = ($data && isset($data->company_size)) ? $data->company_size :
+                (($data && isset($data->companySize)) ? $data->companySize :
+                    ($_POST['company_size'] ?? NULL));
+
+            $industry = ($data && isset($data->industry)) ? $data->industry : ($_POST['industry'] ?? NULL);
 
             if (empty($companyName)) {
                 http_response_code(400);

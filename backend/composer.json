@@ -12,5 +12,8 @@
             "name": "Developer",
             "email": "dev@example.com"
         }
-    ]
+    ],
+    "require": {
+        "phpmailer/phpmailer": "^7.0"
+    }
 }
