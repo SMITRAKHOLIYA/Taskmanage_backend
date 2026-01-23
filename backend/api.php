@@ -40,8 +40,10 @@ Valid URLs:
 
 
 // Enable error reporting for debugging
-ini_set('display_errors', 1);
+ini_set('display_errors', 0); // Don't output errors to JSON response
 ini_set('display_startup_errors', 1);
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/backend_debug.log');
 error_reporting(E_ALL);
 
 // Dynamically determine base path
@@ -125,6 +127,14 @@ try {
                 $controller->login();
             } elseif ($action === "register" && $method === "POST") {
                 $controller->register();
+            } elseif ($action === "forgot-password" && $method === "POST") {
+                require_once __DIR__ . "/controllers/PasswordResetController.php";
+                $resetController = new PasswordResetController();
+                $resetController->requestReset();
+            } elseif ($action === "reset-password" && $method === "POST") {
+                require_once __DIR__ . "/controllers/PasswordResetController.php";
+                $resetController = new PasswordResetController();
+                $resetController->resetPassword();
             } else {
                 http_response_code(404);
                 echo json_encode(["message" => "Auth endpoint not found"]);

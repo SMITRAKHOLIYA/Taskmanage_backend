@@ -26,14 +26,16 @@ class Database
         $this->conn = null;
 
         try {
-            $this->conn = new PDO(
-                "mysql:host=" . $this->host . ";dbname=" . $this->db_name,
-                $this->username,
-                $this->password,
-                [PDO::ATTR_TIMEOUT => 10]
-            );
-            $this->conn->exec("set names utf8");
+            // SQLite Connection
+            // Ensure the directory is writable. Database file created by setup_sqlite.php
+            // db.php is in /config, so we go up one level to /backend
+            $dbFile = __DIR__ . '/../database.sqlite';
+            $this->conn = new PDO("sqlite:" . $dbFile);
             $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+            // Allow larger timeouts if needed, though less relevant for SQLite
+            $this->conn->setAttribute(PDO::ATTR_TIMEOUT, 10);
+
         } catch (PDOException $exception) {
             // Throw the exception so it can be caught by api.php
             throw $exception;

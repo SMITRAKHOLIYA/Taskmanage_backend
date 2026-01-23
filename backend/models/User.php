@@ -23,7 +23,7 @@ class User
 
     public function create()
     {
-        $query = "INSERT INTO " . $this->table_name . " SET username=:username, email=:email, password_hash=:password, role=:role, points=:points, company_id=:company_id, profile_pic=:profile_pic, created_at=:created_at";
+        $query = "INSERT INTO " . $this->table_name . " (username, email, password_hash, role, points, company_id, profile_pic, created_at) VALUES (:username, :email, :password, :role, :points, :company_id, :profile_pic, :created_at)";
         $stmt = $this->conn->prepare($query);
 
         $this->username = htmlspecialchars(strip_tags($this->username));
@@ -134,6 +134,61 @@ class User
         $this->profile_pic = htmlspecialchars(strip_tags($url));
         $stmt->bindParam(':profile_pic', $this->profile_pic);
         $stmt->bindParam(':id', $this->id);
+        return $stmt->execute();
+    }
+
+    // --- Forgot Password Methods ---
+    // Methods for handling password reset functionality
+
+    public function saveResetToken($tokenHash, $expiresAt)
+    {
+        $query = "UPDATE " . $this->table_name . " 
+                  SET reset_token_hash = :hash, 
+                      reset_token_expires_at = :expires, 
+                      last_reset_request_at = NOW() 
+                  WHERE id = :id";
+
+        $stmt = $this->conn->prepare($query);
+        $stmt->bindParam(':hash', $tokenHash);
+        $stmt->bindParam(':expires', $expiresAt);
+        $stmt->bindParam(':id', $this->id);
+
+        return $stmt->execute();
+    }
+
+    public function getByResetToken($tokenHash)
+    {
+        $query = "SELECT id, reset_token_expires_at FROM " . $this->table_name . " 
+                  WHERE reset_token_hash = :hash LIMIT 1";
+
+        $stmt = $this->conn->prepare($query);
+        $stmt->bindParam(':hash', $tokenHash);
+        $stmt->execute();
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row) {
+            $this->id = $row['id'];
+            // Check expiry
+            if (strtotime($row['reset_token_expires_at']) > time()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public function updatePassword($newPasswordHash)
+    {
+        $query = "UPDATE " . $this->table_name . " 
+                  SET password_hash = :password, 
+                      reset_token_hash = NULL, 
+                      reset_token_expires_at = NULL 
+                  WHERE id = :id";
+
+        $stmt = $this->conn->prepare($query);
+        $stmt->bindParam(':password', $newPasswordHash);
+        $stmt->bindParam(':id', $this->id);
+
         return $stmt->execute();
     }
 }

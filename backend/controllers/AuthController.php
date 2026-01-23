@@ -38,31 +38,39 @@ class AuthController
         $this->user->email = $email;
         $email_exists = $this->user->emailExists();
 
-        if ($email_exists && password_verify($password, $this->user->password)) {
-            $token_data = [
-                "id" => $this->user->id,
-                "username" => $this->user->username,
-                "email" => $this->user->email,
-                "role" => $this->user->role,
-                "points" => $this->user->points,
-                "company_id" => $this->user->company_id
-            ];
-
-            $token = $this->jwt->generate_jwt($token_data);
-
-            // Log activity
-            $this->activityLog->create($this->user->id, "User Login", "User logged in successfully");
-
-            http_response_code(200);
-            echo json_encode([
-                "message" => "Successful login",
-                "token" => $token,
-                "user" => $token_data
-            ]);
-        } else {
+        if (!$email_exists) {
             http_response_code(401);
-            echo json_encode(["message" => "Login failed. Invalid credentials."]);
+            echo json_encode(["message" => "No account found with this email."]);
+            return;
         }
+
+        if (!password_verify($password, $this->user->password)) {
+            http_response_code(401);
+            echo json_encode(["message" => "Incorrect password."]);
+            return;
+        }
+
+        // Login Successful
+        $token_data = [
+            "id" => $this->user->id,
+            "username" => $this->user->username,
+            "email" => $this->user->email,
+            "role" => $this->user->role,
+            "points" => $this->user->points,
+            "company_id" => $this->user->company_id
+        ];
+
+        $token = $this->jwt->generate_jwt($token_data);
+
+        // Log activity
+        $this->activityLog->create($this->user->id, "User Login", "User logged in successfully");
+
+        http_response_code(200);
+        echo json_encode([
+            "message" => "Successful login",
+            "token" => $token,
+            "user" => $token_data
+        ]);
     }
 
     public function register()
