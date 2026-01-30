@@ -39,12 +39,14 @@ class AuthController
         $email_exists = $this->user->emailExists();
 
         if (!$email_exists) {
+            error_log("Login Failed: Email not found - " . $email);
             http_response_code(401);
             echo json_encode(["message" => "No account found with this email."]);
             return;
         }
 
         if (!password_verify($password, $this->user->password)) {
+            error_log("Login Failed: Incorrect password for - " . $email);
             http_response_code(401);
             echo json_encode(["message" => "Incorrect password."]);
             return;

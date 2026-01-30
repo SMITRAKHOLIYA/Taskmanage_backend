@@ -277,9 +277,8 @@ class TaskController
                 if ($isManager && !$isAssignee) {
                     $note = $data->note ?? $data->override_reason ?? '';
                     if (empty($note) || trim($note) === '') {
-                        http_response_code(403);
-                        echo json_encode(["message" => "Changing status requires an override reason."]);
-                        return;
+                        // Allow implicit update (e.g. via Kanban Drag & Drop)
+                        $note = "Status updated via Board/API";
                     }
                     // Save to task model
                     $this->task->last_override_reason = $note;

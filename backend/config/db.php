@@ -26,17 +26,15 @@ class Database
         $this->conn = null;
 
         try {
-            // SQLite Connection
-            // Ensure the directory is writable. Database file created by setup_sqlite.php
-            // db.php is in /config, so we go up one level to /backend
-            $dbFile = __DIR__ . '/../database.sqlite';
-            $this->conn = new PDO("sqlite:" . $dbFile);
+            // MySQL Connection
+            $dsn = "mysql:host=" . $this->host . ";dbname=" . $this->db_name . ";charset=utf8mb4";
+            $this->conn = new PDO($dsn, $this->username, $this->password);
             $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-            // Allow larger timeouts if needed, though less relevant for SQLite
-            $this->conn->setAttribute(PDO::ATTR_TIMEOUT, 10);
+            error_log("DB Connection Success: MySQL connected to " . $this->host);
 
         } catch (PDOException $exception) {
+            error_log("DB Connection Failed (MySQL): " . $exception->getMessage());
             // Throw the exception so it can be caught by api.php
             throw $exception;
         }

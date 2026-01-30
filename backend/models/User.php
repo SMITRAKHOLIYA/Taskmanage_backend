@@ -76,14 +76,13 @@ class User
         $query = "SELECT u.id, u.username, u.password_hash, u.role, u.points, u.company_id, u.profile_pic, u.created_at, c.name as company_name 
                   FROM " . $this->table_name . " u 
                   LEFT JOIN companies c ON u.company_id = c.id 
-                  WHERE u.email = ? LIMIT 0,1";
+                  WHERE u.email = ? LIMIT 1";
         $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(1, $this->email);
-        $stmt->execute();
-        $num = $stmt->rowCount();
+        $stmt->execute([$this->email]);
 
-        if ($num > 0) {
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row) {
             $this->id = $row['id'];
             $this->username = $row['username'];
             $this->password = $row['password_hash'];
@@ -94,8 +93,12 @@ class User
             $this->profile_pic = $row['profile_pic'];
             $this->created_at = $row['created_at'];
             $this->company_name = isset($row['company_name']) ? $row['company_name'] : null;
+
+            error_log("User found for email: " . $this->email);
             return true;
         }
+
+        error_log("User NOT found for email: " . $this->email);
         return false;
     }
 
